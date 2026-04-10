@@ -1,0 +1,1 @@
+{'first_new': 'First new line!', 'second_new': 'Second new line!'}
