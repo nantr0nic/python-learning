@@ -1,4 +1,5 @@
 import socket
+import random
 
 
 def main():
@@ -15,8 +16,14 @@ def main():
         messageData = message.decode()
         messageSeq = int(messageData.split()[-1])
         print(f"Received {messageData} from {clientAddress}")
-        serverSocket.sendto(f"PONG {messageSeq}".encode(), clientAddress)
-        print("Pong returned!")
+        if messageSeq == 0:
+            packetToDrop = random.randint(1,9)
+        if messageSeq == packetToDrop:
+            print(f"(Simulation) Dropping packet #({messageSeq})")
+            continue
+        else:
+            serverSocket.sendto(f"PONG {messageSeq}".encode(), clientAddress)
+            print("Pong returned!")
 
 
 if __name__ == "__main__":
