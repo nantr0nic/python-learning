@@ -1,5 +1,5 @@
 import sys
-from socket import *
+from socket import AF_INET, SO_REUSEADDR, SOCK_STREAM, SOL_SOCKET, socket
 
 serverPort = 80
 serverSocket = socket(AF_INET, SOCK_STREAM)
@@ -7,7 +7,7 @@ serverSocket = socket(AF_INET, SOCK_STREAM)
 serverSocket.setsockopt(SOL_SOCKET, SO_REUSEADDR, 1)
 
 try:
-    serverSocket.bind(('', serverPort))
+    serverSocket.bind(("0.0.0.0", serverPort))
     serverSocket.listen(1)
     print(f"Web server up and listening on port {serverPort}.")
     print("Press CTRL + C to shut down server.")
@@ -45,7 +45,9 @@ try:
         except IOError:
             # Send response message for file not found
             connectionSocket.send("HTTP/1.1 404 Not Found\r\n\r\n".encode())
-            connectionSocket.send("<html><body><h1>404 Not Found</h1></body></html>".encode())
+            connectionSocket.send(
+                "<html><body><h1>404 Not Found</h1></body></html>".encode()
+            )
             connectionSocket.close()
             print(f"File {filename} not found.")
 
