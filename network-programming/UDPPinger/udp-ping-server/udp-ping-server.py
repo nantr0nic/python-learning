@@ -1,5 +1,5 @@
-import socket
 import random
+import socket
 
 
 def main():
@@ -17,7 +17,7 @@ def main():
         messageSeq = int(messageData.split()[-1])
         print(f"Received {messageData} from {clientAddress}")
         if messageSeq == 0:
-            packetToDrop = random.randint(1,9)
+            packetToDrop = random.randint(1, 9)
         if messageSeq == packetToDrop:
             print(f"(Simulation) Dropping packet #({messageSeq})")
             continue
