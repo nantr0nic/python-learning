@@ -6,14 +6,16 @@ def main():
 
     serverPort: int = 12000
     serverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    serverAddress = ("localhost", serverPort)
+    serverAddress = ("0.0.0.0", serverPort)
     serverSocket.bind(serverAddress)
     print(f"Server is ready to receive pings on port {serverPort}")
 
     while True:
         message, clientAddress = serverSocket.recvfrom(1024)
-        print(f"Received {message.decode()} from {clientAddress}")
-        serverSocket.sendto("PONG".encode(), clientAddress)
+        messageData = message.decode()
+        messageSeq = int(messageData.split()[-1])
+        print(f"Received {messageData} from {clientAddress}")
+        serverSocket.sendto(f"PONG {messageSeq}".encode(), clientAddress)
         print("Pong returned!")
 
 

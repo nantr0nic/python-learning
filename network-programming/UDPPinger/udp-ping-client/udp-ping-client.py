@@ -21,24 +21,31 @@ def main():
 
     args = parser.parse_args()
 
-    run(args.hostname, args.port)
+    run(args.hostname, args.port, args.pings)
 
 
 def run(hostname, port=12000, pings=10):
-    serverName = hostname
-    serverPort: int = port
-    serverAddress = (serverName, serverPort)
+    serverAddress = (hostname, port)
 
     clientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    clientSocket.sendto("PING".encode(), serverAddress)
 
     for i in range(pings):
+        clientSocket.settimeout(1.0)
         pingStartTime = datetime.now()
-        clientSocket.sendto("PING".encode(), serverAddress)
-        message, serverAddress = clientSocket.recvfrom(1024)
-        pingEndTime = datetime.now()
-        elapsedMS = (pingEndTime - pingStartTime).total_seconds() * 1000
-        print(f"{message.decode()} - RTT: {elapsedMS}ms")
+        clientSocket.sendto(f"PING {i}".encode(), serverAddress)
+
+        while True:
+            try:
+                message, _ = clientSocket.recvfrom(1024)
+                messageSeq = int(message.decode().split()[-1])
+                if messageSeq == i:
+                    pingEndTime = datetime.now()
+                    elapsedMS = (pingEndTime - pingStartTime).total_seconds() * 1000
+                    print(f"({i}) {message.decode()} - RTT: {elapsedMS:.2f}ms")
+                    break
+            except socket.timeout:
+                print(f"({i}) Request timed out.")
+                break
 
     clientSocket.close()
 
