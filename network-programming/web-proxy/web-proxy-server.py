@@ -73,6 +73,8 @@ def handle_client(client_socket):
     # Build cache path
     cache_path = f"./cache/{request_hostname}/{path.lstrip('/')}"
 
+    print(f"cache_path is: {cache_path}")
+
     # Try to serve from cache first
     try:
         with open(cache_path, "r") as cache_file:
