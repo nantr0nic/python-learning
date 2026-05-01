@@ -1,4 +1,4 @@
-from socket import *
+from socket import AF_INET, SOCK_STREAM, socket
 
 
 def main():
@@ -6,8 +6,8 @@ def main():
 
     serverPort = 31173
     serverSocket = socket(AF_INET, SOCK_STREAM)
-    serverSocket.bind(('', serverPort))
-    serverSocket.listen(1) # 1 is max number of queued connections
+    serverSocket.bind(("", serverPort))
+    serverSocket.listen(1)  # 1 is max number of queued connections
     print("The server is ready to receive.")
 
     while True:
@@ -20,6 +20,7 @@ def main():
         connectionSocket.send(capitalizedSentence.encode())
         print(f"Sent: {capitalizedSentence}")
         connectionSocket.close()
+
 
 if __name__ == "__main__":
     main()

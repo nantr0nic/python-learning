@@ -1,5 +1,5 @@
 import argparse
-from socket import *
+from socket import AF_INET, SOCK_STREAM, socket
 
 
 def main():
