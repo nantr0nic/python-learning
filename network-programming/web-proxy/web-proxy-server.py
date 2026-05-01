@@ -70,6 +70,10 @@ def handle_client(client_socket):
         print("Request missing Host header, ignoring.")
         return
 
+    # Normalize root path to index.html
+    if path == "/" or path == "":
+        path = "/index.html"
+
     # Build cache path
     cache_path = f"./cache/{request_hostname}/{path.lstrip('/')}"
 
