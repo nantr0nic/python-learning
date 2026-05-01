@@ -81,9 +81,9 @@ def handle_client(client_socket):
 
     # Try to serve from cache first
     try:
-        with open(cache_path, "r") as cache_file:
+        with open(cache_path, "rb") as cache_file:
             cached_content = cache_file.read()
-            client_socket.send(cached_content.encode())
+            client_socket.send(cached_content)
         print("Served from cache.")
 
     except FileNotFoundError:
@@ -111,8 +111,8 @@ def handle_client(client_socket):
                 client_socket.send(response_data)
                 # save to cache...(full response, headers + body)
                 os.makedirs(os.path.dirname(cache_path), exist_ok=True)
-                with open(cache_path, "w") as file:
-                    file.write(response_data.decode())
+                with open(cache_path, "wb") as file:
+                    file.write(response_data)
                 print("Saved data to cache")
             else:
                 # forward all other codes but don't cache them
