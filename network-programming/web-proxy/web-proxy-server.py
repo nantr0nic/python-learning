@@ -96,6 +96,9 @@ def handle_client(client_socket):
         rewritten_line = f"{parts[0]} {path} {parts[2]}"
         rest_of_request = request_data.split("\r\n", 1)[1]
         rewritten_request = f"{rewritten_line}\r\n{rest_of_request}"
+        rewritten_request = rewritten_request.replace(
+            "Connection: keep-alive", "Connection: close"
+        )
         try:
             print("Fetching from remote server...")
             web_socket.send(rewritten_request.encode())
