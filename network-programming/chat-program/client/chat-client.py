@@ -1,6 +1,11 @@
 import argparse
 import socket
 import sys
+import threading
+
+# move these later
+threads = []
+server_live: bool = False
 
 
 def main():
@@ -15,36 +20,85 @@ def main():
 
 
 def run(host, port):
-    print("Welcome to the chat client! Please enter your name:")
+    global server_live
+    print("Welcome to the chat client!")
 
-    name: str = input()
-    for char in name:
-        if not char.isalnum() and char != "_":
-            print(
-                "Invalid name. Please use alphanumeric characters or underscores only."
-            )
-            return
-
-    client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    client_socket.connect((host, port))
-    client_socket.send(name.encode())
-    name_response = client_socket.recv(1024).decode()
-
-    if name_response == "name_rejected":
-        print("Name taken! Restart and choose another one.")
-        client_socket.close()
+    print(f"Connecting to server: {host}:{port}")
+    try:
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        client_socket.connect((host, port))
+        server_live = True
+    except Exception as e:
+        print(f"Connection failed: {e}")
         sys.exit()
-    elif name_response == "name_accepted":
-        print(f"You've successfully connected! Welcome, {name}!")
-    else:
-        print("Undefined server response. Exiting!")
-        client_socket.close()
-        sys.exit()
-        
-    while True:
+    print("Connected!")
+
+    setting_name: bool = True
+    while setting_name:
+        print("\nPlease enter your name >> ")
+        name: str = input()
+        for char in name:
+            if not char.isalnum() and char != "_":
+                print(
+                    "Invalid name. Please use alphanumeric characters or underscores only."
+                )
+                continue
+
+        client_socket.send(name.encode())
+        name_response = client_socket.recv(1024).decode()
+
+        if name_response.split("|")[0] == "name_rejected":
+            print("Name taken!")
+            continue
+        elif name_response.split("|")[0] == "name_accepted":
+            print(f"You've successfully connected! Welcome, {name}!")
+            print(f"Current users: {name_response.split('|')[1:]}")
+            setting_name = False
+        else:
+            print("Undefined server response. Exiting!")
+            client_socket.close()
+            server_live = False
+            sys.exit()
+
+    receive_thread = threading.Thread(target=receive_messages, args=(client_socket,))
+    threads.append(receive_thread)
+    receive_thread.start()
+
+    send_thread = threading.Thread(target=send_message, args=(client_socket, name))
+    threads.append(send_thread)
+    send_thread.start()
+
+    for thread in threads:
+        thread.join()
+
+
+def receive_messages(client_socket):
+    global server_live
+    while server_live:
+        try:
+            recv_message = client_socket.recv(1024).decode()
+            if recv_message == "":
+                client_socket.close()
+                print("The server disconnected! Try reconnecting later.")
+                server_live = False
+            else:
+                print(recv_message)
+        except (ConnectionResetError, ConnectionAbortedError):
+            client_socket.close()
+            print("The server disconnected abruptly. Try reconnecting later.")
+            server_live = False
+
+
+def send_message(client_socket, name):
+    while server_live:
+        print("msg ===> ")
         message: str = input()
-        client_socket.send(message.encode())
-        
+        out_message = f"<{name}> {message}"
+        try:
+            client_socket.send(out_message.encode())
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            continue
 
 
 if __name__ == "__main__":
