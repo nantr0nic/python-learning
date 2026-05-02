@@ -125,6 +125,7 @@ def leave(client_socket, server_running):
     client_socket.close()
     server_running.clear()
     print(" >> Leaving! << ")
+    sys.exit()
 
 
 if __name__ == "__main__":
