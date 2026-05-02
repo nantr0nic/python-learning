@@ -19,7 +19,7 @@ def main():
 def run(host, port):
     threads = []
     server_running = threading.Event()
-    print("Welcome to the chat client!")
+    print(" >> Welcome to the chat client! << ")
 
     # Connect to server
     client_socket = connect_to_server(host, port, server_running)
@@ -44,23 +44,27 @@ def run(host, port):
     for thread in threads:
         thread.join()
 
+
 def connect_to_server(host, port, server_running) -> socket.socket:
-    print(f"Connecting to server: {host}:{port}")
+    print(f" >> Connecting to server: {host}:{port}")
     try:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((host, port))
         server_running.set()
     except Exception as e:
-        print(f"Connection failed: {e}\nTry again or connect to a different server.")
+        print(
+            f" >> Connection failed: {e}\nTry again or connect to a different server."
+        )
         sys.exit()
-    print("Connected!\n(Type /leave to exit)")
+    print(" >> Connected!\n(Type /leave to exit)")
     return client_socket
+
 
 def set_name(client_socket, server_running) -> str:
     name: str = ""
     setting_name: bool = True
     while setting_name:
-        print("\nPlease enter your name:")
+        print("\n >> Please enter your name:")
         name: str = input()
         if not all(char.isalnum() and char != "_" for char in name):
             print(
@@ -72,18 +76,19 @@ def set_name(client_socket, server_running) -> str:
         name_response = client_socket.recv(1024).decode()
 
         if name_response.split("|")[0] == "name_rejected":
-            print("Name taken!")
+            print(" >> Name taken!")
             continue
         elif name_response.split("|")[0] == "name_accepted":
-            print(f"You've successfully connected! Welcome, {name}!")
-            print(f"Current users: {name_response.split('|')[1:]}")
+            print(f" >> You've successfully connected! Welcome, {name}!")
+            print(f" >> Current users: {name_response.split('|')[1:]}")
             setting_name = False
         else:
-            print("Undefined server response. Exiting!")
+            print(" >> Undefined server response. Exiting!")
             client_socket.close()
             server_running.clear()
             sys.exit()
     return name
+
 
 def receive_messages(client_socket, server_running):
     while server_running.is_set():
@@ -91,13 +96,13 @@ def receive_messages(client_socket, server_running):
             recv_message = client_socket.recv(1024).decode()
             if recv_message == "":
                 client_socket.close()
-                print("The server disconnected! Try reconnecting later.")
+                print(" >> The server disconnected! Try reconnecting later.")
                 server_running.clear()
             else:
-                print(datetime.now().strftime("%H:%M:%S") + " " + recv_message)
+                print("(" + datetime.now().strftime("%H:%M:%S") + ") " + recv_message)
         except (ConnectionResetError, ConnectionAbortedError):
             client_socket.close()
-            print("The server disconnected abruptly. Try reconnecting later.")
+            print(" >> The server disconnected abruptly. Try reconnecting later.")
             server_running.clear()
 
 
@@ -107,12 +112,14 @@ def send_message(client_socket, name, server_running):
         if message == "/leave":
             client_socket.close()
             server_running.clear()
+            print(" >> Leaving!")
+            sys.exit()
             break
         out_message = f"<{name}> {message}"
         try:
             client_socket.send(out_message.encode())
         except Exception as e:
-            print(f"An error occurred: {e}")
+            print(f" >> An error occurred: {e}")
             continue
 
 
