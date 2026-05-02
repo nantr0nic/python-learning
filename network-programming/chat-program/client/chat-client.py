@@ -52,6 +52,7 @@ def connect_to_server(host, port, server_running) -> socket.socket:
         client_socket.connect((host, port))
         server_running.set()
     except Exception as e:
+        client_socket.close()
         print(
             f" >> Connection failed: {e}\nTry again or connect to a different server."
         )
@@ -66,7 +67,7 @@ def set_name(client_socket, server_running) -> str:
     while setting_name:
         print("\n >> Please enter your name:")
         name: str = input()
-        if not all(char.isalnum() and char != "_" for char in name):
+        if not all(char.isalnum() or char == "_" for char in name):
             print(
                 "Invalid name. Please use alphanumeric characters or underscores only."
             )
@@ -110,10 +111,7 @@ def send_message(client_socket, name, server_running):
     while server_running.is_set():
         message: str = input()
         if message == "/leave":
-            client_socket.close()
-            server_running.clear()
-            print(" >> Leaving!")
-            sys.exit()
+            leave(client_socket, server_running)
             break
         out_message = f"<{name}> {message}"
         try:
@@ -121,6 +119,12 @@ def send_message(client_socket, name, server_running):
         except Exception as e:
             print(f" >> An error occurred: {e}")
             continue
+
+
+def leave(client_socket, server_running):
+    client_socket.close()
+    server_running.clear()
+    print(" >> Leaving! << ")
 
 
 if __name__ == "__main__":
