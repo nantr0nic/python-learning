@@ -6,7 +6,7 @@ from include.server import Server
 def main():
     parser = argparse.ArgumentParser(description="A simple but functional chat server.")
     parser.add_argument(
-        "port",
+        "--port",
         type=int,
         default=31173,
         help="The port to listen on (default: 31173)",

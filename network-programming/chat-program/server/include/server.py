@@ -10,6 +10,7 @@ class Server:
         self.client_threads = []
 
     def run(self):
+        '''Main server loop that accepts connections and handles messages.'''
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.bind(("0.0.0.0", self.port))
         self.server_socket.listen(10)
@@ -20,6 +21,7 @@ class Server:
         accept_thread.start()
 
     def accept_connections(self):
+        '''Accepts incoming connections and handles them in separate threads.'''
         while True:
             connection_socket, connection_address = self.server_socket.accept()
             handler_thread = threading.Thread(
@@ -29,7 +31,7 @@ class Server:
             handler_thread.start()
 
     def handle_client(self, connection_socket, connection_address):
-        # Handle client's username first
+        '''Handles initial client connection (name setting) then message handling.'''
         setting_name: bool = True
         while setting_name:
             receive_client_username = connection_socket.recv(1024).decode()
@@ -44,12 +46,17 @@ class Server:
                     self.connected_clients.update(
                         {connection_socket: receive_client_username}
                     )
-                    # accept name and send list of current users
                     response = f"name_accepted|{list(self.connected_clients.values())}"
                     connection_socket.send(response.encode())
                     setting_name = False
+            self.broadcast_message(
+                f"{receive_client_username} has joined the chat".encode()
+            )
 
-        # Now handle their messages
+        self.handle_messages(connection_socket)
+
+    def handle_messages(self, connection_socket):
+        '''Handles incoming messages from the client.'''
         while True:
             try:
                 receive_message = connection_socket.recv(1024)
@@ -73,6 +80,7 @@ class Server:
                 break
 
     def broadcast_message(self, message):
+        '''Broadcasts a message to all connected clients.'''
         clients_copy: list = []
         with self.clients_dict_lock:
             for client_socket in self.connected_clients.keys():

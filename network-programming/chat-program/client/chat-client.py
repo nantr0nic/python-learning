@@ -3,15 +3,11 @@ import socket
 import sys
 import threading
 
-# move these later
-threads = []
-server_live: bool = False
-
 
 def main():
     parser = argparse.ArgumentParser(description="A simple chat client.")
     parser.add_argument(
-        "--host", type=str, help="Host to connect to (e.g. google.com or 8.8.8.8)"
+        "host", type=str, help="Host to connect to (e.g. google.com or 8.8.8.8)"
     )
     parser.add_argument("--port", type=int, default=31173, help="Port to connect to")
     args = parser.parse_args()
@@ -20,29 +16,56 @@ def main():
 
 
 def run(host, port):
-    global server_live
+    threads = []
+    server_running = threading.Event()
     print("Welcome to the chat client!")
 
+    # Connect to server
+    client_socket = connect_to_server(host, port, server_running)
+
+    # Negotiate name with server
+    name = set_name(client_socket, server_running)
+
+    # Start message receive thread
+    receive_thread = threading.Thread(
+        target=receive_messages, args=(client_socket, server_running)
+    )
+    threads.append(receive_thread)
+    receive_thread.start()
+
+    # Start message send thread
+    send_thread = threading.Thread(
+        target=send_message, args=(client_socket, name, server_running)
+    )
+    threads.append(send_thread)
+    send_thread.start()
+
+    for thread in threads:
+        thread.join()
+
+def connect_to_server(host, port, server_running) -> socket.socket:
     print(f"Connecting to server: {host}:{port}")
     try:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((host, port))
-        server_live = True
+        server_running.set()
     except Exception as e:
-        print(f"Connection failed: {e}")
+        print(f"Connection failed: {e}\nTry again or connect to a different server.")
         sys.exit()
     print("Connected!")
+    return client_socket
 
+def set_name(client_socket, server_running) -> str:
+    name: str = ""
     setting_name: bool = True
     while setting_name:
-        print("\nPlease enter your name >> ")
+        print("\nPlease enter your name:")
         name: str = input()
-        for char in name:
-            if not char.isalnum() and char != "_":
-                print(
-                    "Invalid name. Please use alphanumeric characters or underscores only."
-                )
-                continue
+        if not all(char.isalnum() and char != "_" for char in name):
+            print(
+                "Invalid name. Please use alphanumeric characters or underscores only."
+            )
+            continue
 
         client_socket.send(name.encode())
         name_response = client_socket.recv(1024).decode()
@@ -57,41 +80,28 @@ def run(host, port):
         else:
             print("Undefined server response. Exiting!")
             client_socket.close()
-            server_live = False
+            server_running.clear()
             sys.exit()
+    return name
 
-    receive_thread = threading.Thread(target=receive_messages, args=(client_socket,))
-    threads.append(receive_thread)
-    receive_thread.start()
-
-    send_thread = threading.Thread(target=send_message, args=(client_socket, name))
-    threads.append(send_thread)
-    send_thread.start()
-
-    for thread in threads:
-        thread.join()
-
-
-def receive_messages(client_socket):
-    global server_live
-    while server_live:
+def receive_messages(client_socket, server_running):
+    while server_running.is_set():
         try:
             recv_message = client_socket.recv(1024).decode()
             if recv_message == "":
                 client_socket.close()
                 print("The server disconnected! Try reconnecting later.")
-                server_live = False
+                server_running.clear()
             else:
                 print(recv_message)
         except (ConnectionResetError, ConnectionAbortedError):
             client_socket.close()
             print("The server disconnected abruptly. Try reconnecting later.")
-            server_live = False
+            server_running.clear()
 
 
-def send_message(client_socket, name):
-    while server_live:
-        print("msg ===> ")
+def send_message(client_socket, name, server_running):
+    while server_running.is_set():
         message: str = input()
         out_message = f"<{name}> {message}"
         try:
