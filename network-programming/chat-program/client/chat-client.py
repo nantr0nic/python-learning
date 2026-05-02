@@ -2,6 +2,7 @@ import argparse
 import socket
 import sys
 import threading
+from datetime import datetime
 
 
 def main():
@@ -52,7 +53,7 @@ def connect_to_server(host, port, server_running) -> socket.socket:
     except Exception as e:
         print(f"Connection failed: {e}\nTry again or connect to a different server.")
         sys.exit()
-    print("Connected!")
+    print("Connected!\n(Type /leave to exit)")
     return client_socket
 
 def set_name(client_socket, server_running) -> str:
@@ -93,7 +94,7 @@ def receive_messages(client_socket, server_running):
                 print("The server disconnected! Try reconnecting later.")
                 server_running.clear()
             else:
-                print(recv_message)
+                print(datetime.now().strftime("%H:%M:%S") + " " + recv_message)
         except (ConnectionResetError, ConnectionAbortedError):
             client_socket.close()
             print("The server disconnected abruptly. Try reconnecting later.")
@@ -103,6 +104,10 @@ def receive_messages(client_socket, server_running):
 def send_message(client_socket, name, server_running):
     while server_running.is_set():
         message: str = input()
+        if message == "/leave":
+            client_socket.close()
+            server_running.clear()
+            break
         out_message = f"<{name}> {message}"
         try:
             client_socket.send(out_message.encode())
