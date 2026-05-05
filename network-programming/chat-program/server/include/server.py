@@ -26,6 +26,14 @@ class Server:
         self.chat_channels = {"general": {"members": set()}}
         self.channels_dict_lock = threading.Lock()
 
+        # Server commands
+        self.commands = {
+            "list": self.handle_list_channels,
+            "users": self.handle_list_users,
+            "join": self.handle_join_channel,
+            "quit": self.handle_quit,
+        }
+
     def run(self):
         """Main server loop"""
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -86,7 +94,7 @@ class Server:
                     connection_socket.send(response.encode())
                     setting_name = False
 
-        self.add_user_to_channel(user, "general")
+        self.handle_join_channel(user, "general")
 
         self.broadcast_global_message(
             f"<<Server>> {user.name} has joined the server!".encode()
@@ -102,6 +110,20 @@ class Server:
                 if receive_message == b"":
                     self.remove_user(user)
                     break
+                elif receive_message.startswith(b"/"):
+                    parts = receive_message.decode().strip().split(maxsplit=1)
+                    command = parts[0][1:].lower()  # /join -> join
+                    arg = parts[1] if len(parts) > 1 else ""
+
+                    handler = self.commands.get(command)
+                    if handler:
+                        handler(user, arg)
+                        if command == "quit":
+                            break
+                    else:
+                        user.user_socket.send(
+                            f"<<Server>> Unknown command: {command}".encode()
+                        )
                 else:
                     self.broadcast_to_channel(receive_message, user.channel)
             except (ConnectionResetError, ConnectionAbortedError):
@@ -132,9 +154,35 @@ class Server:
             except:
                 pass
 
-    def add_user_to_channel(self, user: User, channel: str):
-        """Add a User to a channel. Locks channels dict."""
+    def handle_list_channels(self, user: User, arg: str = ""):
+        """Lists all channels. Locks channels dict."""
+        with self.channels_dict_lock:
+            channels = ", ".join(self.chat_channels.keys())
+        user.user_socket.send(f"<<Server>> Channels: {channels}".encode())
+
+    def handle_list_users(self, user: User, arg: str = ""):
+        """Lists all users in the server. Locks clients dict."""
+        with self.clients_dict_lock:
+            users = ", ".join(
+                [
+                    f"{client.name} (#{client.channel})"
+                    for client in self.connected_clients.values()
+                ]
+            )
+        user.user_socket.send(f"<<Server>> Users: {users}".encode())
+
+    def handle_join_channel(self, user: User, arg: str):
+        """Handles a User joining a channel. Locks channels dict."""
+        if not arg:
+            user.user_socket.send(
+                "<<Server>> Provide a channel name! Usage: /join #channel".encode()
+            )
+            return
+
+        channel = arg.lstrip("#")
+
         # Check if channel exists, if it doesn't, make it. If it does, switch user to that.
+        # This is messy but trying to minimize network I/O that happens inside the lock
         old_channel: str = user.channel
         created_channel: bool = False
         with self.channels_dict_lock:
@@ -145,7 +193,6 @@ class Server:
                 self.chat_channels[user.channel]["members"].discard(user)
             self.chat_channels[channel]["members"].add(user)
 
-        # This is messy but trying to minimize network I/O that happens inside the lock
         if created_channel:
             user.user_socket.send(
                 f"<<Server>> #{channel} doesn't exist. Creating it!".encode()
@@ -156,6 +203,11 @@ class Server:
             )
         user.channel = channel
         user.user_socket.send(f"<<Server>> You're now in #{channel}. Welcome!".encode())
+
+    def handle_quit(self, user: User, arg: str = ""):
+        """Handle a user leaving the server. Locks channels dict."""
+        user.user_socket.send(b"<<Server>> You are leaving the server. Take it easy!")
+        self.remove_user(user)
 
     def remove_user(self, user: User):
         """Remove a user from the server gracefully. Locks clients and channels dicts."""

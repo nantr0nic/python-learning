@@ -57,7 +57,11 @@ def connect_to_server(host, port, server_running) -> socket.socket:
             f" >> Connection failed: {e}\nTry again or connect to a different server."
         )
         sys.exit()
-    print(" >> Connected!\n(Type /leave to exit)")
+    print(" >> Connected!\nHere are a list of available commands:")
+    print(
+        " >> /list - List all channels\n >> /users - List all users\n >> \
+        /join <channel> - Join a channel\n >> /quit - Quit the server"
+    )
     return client_socket
 
 
@@ -97,21 +101,23 @@ def receive_messages(client_socket, server_running):
             recv_message = client_socket.recv(1024).decode()
             if recv_message == "":
                 client_socket.close()
-                print(" >> The server disconnected! Try reconnecting later.")
+                print(" >> The server disconnected!")
                 server_running.clear()
             else:
                 print("(" + datetime.now().strftime("%H:%M:%S") + ") " + recv_message)
-        except (ConnectionResetError, ConnectionAbortedError):
+        except socket.error as e:
             client_socket.close()
-            print(" >> The server disconnected abruptly. Try reconnecting later.")
+            print(f" >> A connection error occurred: {e}")
             server_running.clear()
 
 
 def send_message(client_socket, name, server_running):
     while server_running.is_set():
         message: str = input()
-        if message == "/leave":
-            leave(client_socket, server_running)
+        if message == "/quit":
+            client_socket.send(b"/quit")
+            server_running.clear()
+            print(" >> Leaving! << ")
             break
         out_message = f"<{name}> {message}"
         try:
@@ -119,13 +125,6 @@ def send_message(client_socket, name, server_running):
         except Exception as e:
             print(f" >> An error occurred: {e}")
             continue
-
-
-def leave(client_socket, server_running):
-    client_socket.close()
-    server_running.clear()
-    print(" >> Leaving! << ")
-    sys.exit()
 
 
 if __name__ == "__main__":
