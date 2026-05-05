@@ -200,7 +200,7 @@ class Server:
             )
         if old_channel:
             self.broadcast_to_channel(
-                f"<<Server>> {user.name} has left {old_channel}!".encode(), old_channel
+                f"<<Server>> {user.name} has left #{old_channel}!".encode(), old_channel
             )
         user.channel = channel
         user.user_socket.send(f"<<Server>> You're now in #{channel}. Welcome!".encode())
