@@ -97,7 +97,7 @@ class Server:
         self.handle_join_channel(user, "general")
 
         self.broadcast_global_message(
-            f"<<Server>> {user.name} has joined the server!".encode()
+            f"\n<<Server>> {user.name} has joined the server!".encode()
         )
         self.handle_messages(user)
 
@@ -125,7 +125,8 @@ class Server:
                             f"<<Server>> Unknown command: {command}".encode()
                         )
                 else:
-                    self.broadcast_to_channel(receive_message, user.channel)
+                    formatted = f"<{user.name}> {receive_message.decode()}"
+                    self.broadcast_to_channel(formatted.encode(), user.channel)
             except (ConnectionResetError, ConnectionAbortedError):
                 self.remove_user(user)
                 break

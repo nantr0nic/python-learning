@@ -60,7 +60,7 @@ def connect_to_server(host, port, server_running) -> socket.socket:
     print(" >> Connected!\nHere are a list of available commands:")
     print(
         " >> /list - List all channels\n >> /users - List all users\n >> \
-        /join <channel> - Join a channel\n >> /quit - Quit the server"
+/join <channel> - Join a channel\n >> /quit - Quit the server"
     )
     return client_socket
 
@@ -119,9 +119,8 @@ def send_message(client_socket, name, server_running):
             server_running.clear()
             print(" >> Leaving! << ")
             break
-        out_message = f"<{name}> {message}"
         try:
-            client_socket.send(out_message.encode())
+            client_socket.send(message.encode())
         except Exception as e:
             print(f" >> An error occurred: {e}")
             continue
