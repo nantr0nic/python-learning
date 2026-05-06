@@ -78,8 +78,7 @@ class Server:
             else:
                 user = User(reader, writer, receive_client_username)
                 self.connected_clients.update({writer: user})
-                response = f"name_accepted|{list(user.name for user in self.connected_clients.values())}"
-                writer.write(response.encode())
+                writer.write("name_accepted".encode())
                 await writer.drain()
                 setting_name = False
 

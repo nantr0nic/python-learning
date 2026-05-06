@@ -83,12 +83,11 @@ def set_name(client_socket, server_running) -> str:
         client_socket.send(name.encode())
         name_response = client_socket.recv(1024).decode()
 
-        if name_response.split("|")[0] == "name_rejected":
+        if name_response == "name_rejected":
             print(" >> Name taken!")
             continue
-        elif name_response.split("|")[0] == "name_accepted":
+        elif name_response == "name_accepted":
             print(f" >> You've successfully connected! Welcome, {name}!")
-            print(f" >> Current users: {name_response.split('|')[1:]}")
             setting_name = False
         else:
             print(" >> Undefined server response. Exiting!")
