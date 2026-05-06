@@ -1,12 +1,14 @@
+import asyncio
 import datetime
-import socket
 import threading
-import time
 
 
 class User:
-    def __init__(self, connection_socket, name):
-        self.user_socket: socket.socket = connection_socket
+    def __init__(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, name: str
+    ):
+        self.user_reader: asyncio.StreamReader = reader
+        self.user_writer: asyncio.StreamWriter = writer
         self.name: str = name
         self.channel: str = ""
 
@@ -14,17 +16,15 @@ class User:
 class Server:
     def __init__(self, port: int):
         self.port: int = port
-        self.client_threads: list = []
+        self.server: asyncio.Server | None = None
         self.start_time = datetime.datetime.now()
 
-        # Dictionary of clients {client_socket: User}
-        self.connected_clients = {}
-        self.clients_dict_lock = threading.Lock()
+        # Dictionary of clients (writers) {writer: User}
+        self.connected_clients: dict[asyncio.StreamWriter, User] = {}
 
         # Always have a default channel named general, each channel
         # just has a list if its members in a set
         self.chat_channels = {"general": {"members": set()}}
-        self.channels_dict_lock = threading.Lock()
 
         # Server commands
         self.commands = {
@@ -34,150 +34,137 @@ class Server:
             "quit": self.handle_quit,
         }
 
-    def run(self):
-        """Main server loop"""
-        self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.server_socket.bind(("0.0.0.0", self.port))
-        self.server_socket.listen(10)
-        print(f"Chat server started. Accepting connections on port {self.port}")
+    async def run(self):
+        """Run the main server"""
+        self.server = await asyncio.start_server(
+            self.handle_client, "0.0.0.0", self.port
+        )
+        async with self.server:
+            if self.server.is_serving():
+                print(f"Chat server started. Accepting connections on port {self.port}")
+            else:
+                print("An error occurred starting the server. Exiting.")
+                return
+            asyncio.create_task(self.report_information())
+            await self.server.serve_forever()
 
-        # Start connecting-accepting thread
-        accept_thread = threading.Thread(target=self.accept_connections)
-        self.client_threads.append(accept_thread)
-        accept_thread.start()
-
-        # Start console-reporting thread
-        report_thread = threading.Thread(target=self.report_information)
-        self.client_threads.append(report_thread)
-        report_thread.start()
-
-    def accept_connections(self):
-        """Accepts incoming connections and handles them in separate threads."""
-        while True:
-            connection_socket, connection_address = self.server_socket.accept()
-
-            handler_thread = threading.Thread(
-                target=self.handle_client, args=(connection_socket,)
-            )
-            self.client_threads.append(handler_thread)
-            handler_thread.start()
-
-    def report_information(self):
+    async def report_information(self):
         """Reports server information to the console."""
         while True:
-            time.sleep(5)
-            with self.clients_dict_lock:
-                count = len(self.connected_clients)
+            await asyncio.sleep(5)
+            count = len(self.connected_clients)
             uptime = datetime.datetime.now() - self.start_time
             print(f"\rServer uptime: {uptime} // Connected clients: {count}", end="")
 
-    def handle_client(self, connection_socket):
+    async def handle_client(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ):
         """Handles client connection, User creation, then passes to message handler."""
         setting_name: bool = True
         while setting_name:
-            receive_client_username = connection_socket.recv(1024).decode()
-            with self.clients_dict_lock:
-                # if receive_client_username in [user.name for user in self.connected_clients.values()]:
-                if any(
-                    user.name == receive_client_username
-                    for user in self.connected_clients.values()
-                ):
-                    connection_socket.send("name_rejected".encode())
-                    continue
-                elif receive_client_username == "":
-                    connection_socket.close()
-                    return
-                else:
-                    user = User(connection_socket, receive_client_username)
-                    self.connected_clients.update({connection_socket: user})
-                    response = f"name_accepted|{list(user.name for user in self.connected_clients.values())}"
-                    connection_socket.send(response.encode())
-                    setting_name = False
+            receive_data = await reader.read(1024)
+            receive_client_username = receive_data.decode()
+            # if receive_client_username in [user.name for user in self.connected_clients.values()]:
+            if any(
+                user.name == receive_client_username
+                for user in self.connected_clients.values()
+            ):
+                writer.write("name_rejected".encode())
+                await writer.drain()
+                continue
+            elif receive_client_username == "":
+                writer.close()
+                return
+            else:
+                user = User(reader, writer, receive_client_username)
+                self.connected_clients.update({writer: user})
+                response = f"name_accepted|{list(user.name for user in self.connected_clients.values())}"
+                writer.write(response.encode())
+                await writer.drain()
+                setting_name = False
 
-        self.handle_join_channel(user, "general")
-
-        self.broadcast_global_message(
+        await self.handle_join_channel(user, "general")
+        await self.broadcast_global_message(
             f"\n<<Server>> {user.name} has joined the server!".encode()
         )
-        self.handle_messages(user)
+        await self.handle_messages(user)
 
-    def handle_messages(self, user: User):
+    async def handle_messages(self, user: User):
         """Handles incoming messages from the User."""
         while True:
             try:
-                receive_message = user.user_socket.recv(1024)
+                receive_data = await user.user_reader.read(1024)
+                receive_message = receive_data.decode()
                 # empty byte data signals a disconnection
-                if receive_message == b"":
-                    self.remove_user(user)
+                if receive_data == b"":
+                    await self.remove_user(user)
                     break
-                elif receive_message.startswith(b"/"):
-                    parts = receive_message.decode().strip().split(maxsplit=1)
+                elif receive_message.startswith("/"):
+                    parts = receive_message.strip().split(maxsplit=1)
                     command = parts[0][1:].lower()  # /join -> join
                     arg = parts[1] if len(parts) > 1 else ""
 
                     handler = self.commands.get(command)
                     if handler:
-                        handler(user, arg)
+                        await handler(user, arg)
                         if command == "quit":
                             break
                     else:
-                        user.user_socket.send(
+                        user.user_writer.write(
                             f"<<Server>> Unknown command: {command}".encode()
                         )
+                        await user.user_writer.drain()
                 else:
-                    formatted = f"<{user.name}> {receive_message.decode()}"
-                    self.broadcast_to_channel(formatted.encode(), user.channel)
+                    formatted = f"<{user.name}> {receive_message}"
+                    await self.broadcast_to_channel(formatted.encode(), user.channel)
             except (ConnectionResetError, ConnectionAbortedError):
-                self.remove_user(user)
+                await self.remove_user(user)
                 break
 
-    def broadcast_global_message(self, message):
-        """Broadcasts a message to all connected clients. Locks clients dict."""
-        clients_copy: list = []
-        with self.clients_dict_lock:
-            for client_socket in self.connected_clients.keys():
-                clients_copy.append(client_socket)
-        for client in clients_copy:
+    async def broadcast_global_message(self, message):
+        """Broadcasts a message to all connected clients."""
+        clients = list(self.connected_clients.keys())
+        for client in clients:
             try:
-                client.send(message)
+                client.write(message)
+                await client.drain()
             except:
                 pass
 
-    def broadcast_to_channel(self, message, channel: str):
-        """Broadcasts a message to users in a channel. Locks channels dict."""
-        channel_members: list = []
-        with self.channels_dict_lock:
-            for member in self.chat_channels[channel]["members"]:
-                channel_members.append(member)
-        for member in channel_members:
+    async def broadcast_to_channel(self, message, channel: str):
+        """Broadcasts a message to users in a channel."""
+        members = list(self.chat_channels[channel]["members"])
+        for member in members:
             try:
-                member.user_socket.send(message)
+                member.user_writer.write(message)
+                await member.user_writer.drain()
             except:
                 pass
 
-    def handle_list_channels(self, user: User, arg: str = ""):
-        """Lists all channels. Locks channels dict."""
-        with self.channels_dict_lock:
-            channels = ", ".join(self.chat_channels.keys())
-        user.user_socket.send(f"<<Server>> Channels: {channels}".encode())
+    async def handle_list_channels(self, user: User, arg: str = ""):
+        """Lists all channels."""
+        channels = ", ".join(self.chat_channels.keys())
+        user.user_writer.write(f"<<Server>> Channels: {channels}".encode())
+        await user.user_writer.drain()
 
-    def handle_list_users(self, user: User, arg: str = ""):
-        """Lists all users in the server. Locks clients dict."""
-        with self.clients_dict_lock:
-            users = ", ".join(
-                [
-                    f"{client.name} (#{client.channel})"
-                    for client in self.connected_clients.values()
-                ]
-            )
-        user.user_socket.send(f"<<Server>> Users: {users}".encode())
+    async def handle_list_users(self, user: User, arg: str = ""):
+        """Lists all users in the server."""
+        users = ", ".join(
+            [
+                f"{client.name} (#{client.channel})"
+                for client in self.connected_clients.values()
+            ]
+        )
+        user.user_writer.write(f"<<Server>> Users: {users}".encode())
+        await user.user_writer.drain()
 
-    def handle_join_channel(self, user: User, arg: str):
-        """Handles a User joining a channel. Locks channels dict."""
+    async def handle_join_channel(self, user: User, arg: str):
+        """Handles a User joining a channel."""
         if not arg:
-            user.user_socket.send(
+            user.user_writer.write(
                 "<<Server>> Provide a channel name! Usage: /join #channel".encode()
             )
+            await user.user_writer.drain()
             return
 
         channel = arg.lstrip("#")
@@ -186,37 +173,38 @@ class Server:
         # This is messy but trying to minimize network I/O that happens inside the lock
         old_channel: str = user.channel
         created_channel: bool = False
-        with self.channels_dict_lock:
-            if channel not in self.chat_channels:
-                created_channel = True
-                self.chat_channels[channel] = {"members": set()}
-            if old_channel:
-                self.chat_channels[user.channel]["members"].discard(user)
-            self.chat_channels[channel]["members"].add(user)
+        if channel not in self.chat_channels:
+            created_channel = True
+            self.chat_channels[channel] = {"members": set()}
+        if old_channel:
+            self.chat_channels[user.channel]["members"].discard(user)
+        self.chat_channels[channel]["members"].add(user)
 
         if created_channel:
-            user.user_socket.send(
+            user.user_writer.write(
                 f"<<Server>> #{channel} doesn't exist. Creating it!".encode()
             )
         if old_channel:
-            self.broadcast_to_channel(
+            await self.broadcast_to_channel(
                 f"<<Server>> {user.name} has left #{old_channel}!".encode(), old_channel
             )
         user.channel = channel
-        user.user_socket.send(f"<<Server>> You're now in #{channel}. Welcome!".encode())
+        user.user_writer.write(
+            f"<<Server>> You're now in #{channel}. Welcome!".encode()
+        )
+        await user.user_writer.drain()
 
-    def handle_quit(self, user: User, arg: str = ""):
-        """Handle a user leaving the server. Locks channels dict."""
-        user.user_socket.send(b"<<Server>> You are leaving the server. Take it easy!")
-        self.remove_user(user)
+    async def handle_quit(self, user: User, arg: str = ""):
+        """Handle a user leaving the server."""
+        user.user_writer.write(b"<<Server>> You are leaving the server. Take it easy!")
+        await user.user_writer.drain()
+        await self.remove_user(user)
 
-    def remove_user(self, user: User):
-        """Remove a user from the server gracefully. Locks clients and channels dicts."""
-        with self.clients_dict_lock:
-            del self.connected_clients[user.user_socket]
-        with self.channels_dict_lock:
-            self.chat_channels[user.channel]["members"].discard(user)
-        user.user_socket.close()
-        self.broadcast_global_message(
+    async def remove_user(self, user: User):
+        """Remove a user from the server gracefully."""
+        del self.connected_clients[user.user_writer]
+        self.chat_channels[user.channel]["members"].discard(user)
+        user.user_writer.close()
+        await self.broadcast_global_message(
             f"<<Server>> {user.name} has disconnected!".encode()
         )

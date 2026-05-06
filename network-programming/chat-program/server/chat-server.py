@@ -1,9 +1,10 @@
 import argparse
+import asyncio
 
 from include.server import Server
 
 
-def main():
+async def main():
     parser = argparse.ArgumentParser(description="A simple but functional chat server.")
     parser.add_argument(
         "--port",
@@ -14,11 +15,8 @@ def main():
     args = parser.parse_args()
 
     chat_server = Server(args.port)
-    chat_server.run()
-
-    for thread in chat_server.client_threads:
-        thread.join()
+    await chat_server.run()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
