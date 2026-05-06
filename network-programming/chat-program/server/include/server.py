@@ -200,7 +200,7 @@ class Server:
         )
         await user.user_writer.drain()
         await self.broadcast_to_channel(
-            f"<<Server>> {user.name} has joined #{channel}!", channel
+            f"<<Server>> {user.name} has joined #{channel}!".encode(), channel
         )
 
     async def handle_quit(self, user: User, arg: str = ""):
