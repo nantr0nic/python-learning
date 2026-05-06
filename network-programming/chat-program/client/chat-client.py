@@ -60,7 +60,7 @@ def connect_to_server(host, port, server_running) -> socket.socket:
     print(" >> Connected!\nHere are a list of available commands:")
     print(
         " >> /list - List all channels\n >> /users - List all users\n >> \
-/join <channel> - Join a channel\n >> /quit - Quit the server"
+/join <channel> - Join a channel\n >> /quit - Quit the server\n >> /help - Show this help message"
     )
     return client_socket
 
@@ -71,6 +71,9 @@ def set_name(client_socket, server_running) -> str:
     while setting_name:
         print("\n >> Please enter your name:")
         name: str = input()
+        if not name:
+            print(" >> Name cannot be empty!")
+            continue
         if not all(char.isalnum() or char == "_" for char in name):
             print(
                 "Invalid name. Please use alphanumeric characters or underscores only."
@@ -119,6 +122,12 @@ def send_message(client_socket, name, server_running):
             server_running.clear()
             print(" >> Leaving! << ")
             break
+        elif message == "/help":
+            print(
+                " >> /list - List all channels\n >> /users - List all users\n >> \
+        /join <channel> - Join a channel\n >> /quit - Quit the server\n >> /help - Show this help message"
+            )
+            continue
         try:
             client_socket.send(message.encode())
         except Exception as e:

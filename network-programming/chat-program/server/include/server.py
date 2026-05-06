@@ -1,6 +1,5 @@
 import asyncio
 import datetime
-import threading
 
 
 class User:
@@ -46,15 +45,16 @@ class Server:
                 print("An error occurred starting the server. Exiting.")
                 return
             asyncio.create_task(self.report_information())
+            asyncio.create_task(self.cleanup_channels())
             await self.server.serve_forever()
 
     async def report_information(self):
         """Reports server information to the console."""
         while True:
-            await asyncio.sleep(5)
             count = len(self.connected_clients)
             uptime = datetime.datetime.now() - self.start_time
             print(f"\rServer uptime: {uptime} // Connected clients: {count}", end="")
+            await asyncio.sleep(5)
 
     async def handle_client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -168,6 +168,12 @@ class Server:
             return
 
         channel = arg.lstrip("#")
+        if not all(char.isalnum() or char == "_" for char in channel):
+            user.user_writer.write(
+                "<<Server>> Invalid name. Please use alphanumeric characters or underscores only.".encode()
+            )
+            await user.user_writer.drain()
+            return
 
         # Check if channel exists, if it doesn't, make it. If it does, switch user to that.
         # This is messy but trying to minimize network I/O that happens inside the lock
@@ -193,6 +199,9 @@ class Server:
             f"<<Server>> You're now in #{channel}. Welcome!".encode()
         )
         await user.user_writer.drain()
+        await self.broadcast_to_channel(
+            f"<<Server>> {user.name} has joined #{channel}!", channel
+        )
 
     async def handle_quit(self, user: User, arg: str = ""):
         """Handle a user leaving the server."""
@@ -208,3 +217,14 @@ class Server:
         await self.broadcast_global_message(
             f"<<Server>> {user.name} has disconnected!".encode()
         )
+
+    async def cleanup_channels(self):
+        """Remove empty channels periodically."""
+        while True:
+            to_delete = []
+            for channel_name, channel_data in self.chat_channels.items():
+                if not channel_data["members"] and channel_name != "general":
+                    to_delete.append(channel_name)
+            for name in to_delete:
+                del self.chat_channels[name]
+            await asyncio.sleep(60)
