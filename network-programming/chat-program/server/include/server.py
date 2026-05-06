@@ -66,7 +66,7 @@ class Server:
             receive_client_username = receive_data.decode()
             # if receive_client_username in [user.name for user in self.connected_clients.values()]:
             if any(
-                user.name == receive_client_username
+                user.name.lower() == receive_client_username.lower()
                 for user in self.connected_clients.values()
             ):
                 writer.write("name_rejected".encode())
