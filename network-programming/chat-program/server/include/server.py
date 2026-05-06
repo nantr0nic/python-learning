@@ -174,6 +174,12 @@ class Server:
             return
 
         channel = arg.lstrip("#").lower()
+        if not channel:
+            user.user_writer.write(
+                "<<Server>> Provide a channel name! Usage: /join #channel".encode()
+            )
+            await user.user_writer.drain()
+            return
         if not all(char.isalnum() or char == "_" for char in channel):
             user.user_writer.write(
                 "<<Server>> Invalid name. Please use alphanumeric characters or underscores only.".encode()
