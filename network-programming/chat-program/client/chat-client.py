@@ -124,7 +124,7 @@ def send_message(client_socket, name, server_running):
         elif message == "/help":
             print(
                 " >> /list - List all channels\n >> /users - List all users\n >> \
-        /join <channel> - Join a channel\n >> /quit - Quit the server\n >> /help - Show this help message"
+/join <channel> - Join a channel\n >> /quit - Quit the server\n >> /help - Show this help message"
             )
             continue
         try:

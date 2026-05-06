@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import sys
 
 
 class User:
@@ -64,7 +65,6 @@ class Server:
         while setting_name:
             receive_data = await reader.read(1024)
             receive_client_username = receive_data.decode()
-            # if receive_client_username in [user.name for user in self.connected_clients.values()]:
             if any(
                 user.name.lower() == receive_client_username.lower()
                 for user in self.connected_clients.values()
@@ -116,7 +116,14 @@ class Server:
                 else:
                     formatted = f"<{user.name}> {receive_message}"
                     await self.broadcast_to_channel(formatted.encode(), user.channel)
-            except (ConnectionResetError, ConnectionAbortedError):
+            except (ConnectionError, asyncio.IncompleteReadError) as e:
+                print(f"\nConnection error: {e}", file=sys.stderr)
+                print()
+                await self.remove_user(user)
+                break
+            except Exception as e:
+                print(f"\nUnexpected error: {e}", file=sys.stderr)
+                print()
                 await self.remove_user(user)
                 break
 
@@ -166,7 +173,7 @@ class Server:
             await user.user_writer.drain()
             return
 
-        channel = arg.lstrip("#")
+        channel = arg.lstrip("#").lower()
         if not all(char.isalnum() or char == "_" for char in channel):
             user.user_writer.write(
                 "<<Server>> Invalid name. Please use alphanumeric characters or underscores only.".encode()
@@ -175,27 +182,23 @@ class Server:
             return
 
         # Check if channel exists, if it doesn't, make it. If it does, switch user to that.
-        # This is messy but trying to minimize network I/O that happens inside the lock
         old_channel: str = user.channel
-        created_channel: bool = False
-        if channel not in self.chat_channels:
-            created_channel = True
-            self.chat_channels[channel] = {"members": set()}
-        if old_channel:
-            self.chat_channels[user.channel]["members"].discard(user)
-        self.chat_channels[channel]["members"].add(user)
 
-        if created_channel:
+        if channel not in self.chat_channels:
+            self.chat_channels[channel] = {"members": set()}
             user.user_writer.write(
                 f"<<Server>> #{channel} doesn't exist. Creating it!".encode()
             )
         if old_channel:
+            self.chat_channels[user.channel]["members"].discard(user)
             await self.broadcast_to_channel(
                 f"<<Server>> {user.name} has left #{old_channel}!".encode(), old_channel
             )
+
+        self.chat_channels[channel]["members"].add(user)
         user.channel = channel
         user.user_writer.write(
-            f"<<Server>> You're now in #{channel}. Welcome!".encode()
+            f"<<Server>> You're now in #{channel}. Welcome!\n".encode()
         )
         await user.user_writer.drain()
         await self.broadcast_to_channel(
