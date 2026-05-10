@@ -82,10 +82,10 @@ class Server:
                 await writer.drain()
                 setting_name = False
 
-        await self.handle_join_channel(user, "general")
         await self.broadcast_global_message(
             f"\n<<Server>> {user.name} has joined the server!".encode()
         )
+        await self.handle_join_channel(user, "general")
         await self.handle_messages(user)
 
     async def handle_messages(self, user: User):

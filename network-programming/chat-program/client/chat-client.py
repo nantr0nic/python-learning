@@ -4,6 +4,24 @@ import sys
 import threading
 from datetime import datetime
 
+from prompt_toolkit.application import Application
+from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout import Layout
+from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.controls import BufferControl
+from prompt_toolkit.styles import Style
+
+server_running = threading.Event()
+
+HELP_TEXT = (
+    " >> /list - List all channels\n"
+    " >> /users - List all users\n"
+    " >> /join <channel> - Join a channel\n"
+    " >> /quit - Quit the server\n"
+    " >> /help - Show this help message"
+)
+
 
 def main():
     parser = argparse.ArgumentParser(description="A simple chat client.")
@@ -12,126 +30,206 @@ def main():
     )
     parser.add_argument("--port", type=int, default=31173, help="Port to connect to")
     args = parser.parse_args()
-
     run(args.host, args.port)
 
 
-def run(host, port):
-    threads = []
-    server_running = threading.Event()
-    print(" >> Welcome to the chat client! << ")
-
-    # Connect to server
-    client_socket = connect_to_server(host, port, server_running)
-
-    # Negotiate name with server
-    name = set_name(client_socket, server_running)
-
-    # Start message receive thread
-    receive_thread = threading.Thread(
-        target=receive_messages, args=(client_socket, server_running)
-    )
-    threads.append(receive_thread)
-    receive_thread.start()
-
-    # Start message send thread
-    send_thread = threading.Thread(
-        target=send_message, args=(client_socket, name, server_running)
-    )
-    threads.append(send_thread)
-    send_thread.start()
-
-    for thread in threads:
-        thread.join()
-
-
-def connect_to_server(host, port, server_running) -> socket.socket:
-    print(f" >> Connecting to server: {host}:{port}")
+def connect_to_server(host, port):
+    """Connect silently.  Prints an error and exits only on failure."""
     try:
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         client_socket.connect((host, port))
         server_running.set()
+        return client_socket
     except Exception as e:
-        client_socket.close()
         print(
             f" >> Connection failed: {e}\nTry again or connect to a different server."
         )
         sys.exit()
-    print(" >> Connected!\nHere are a list of available commands:")
-    print(
-        " >> /list - List all channels\n >> /users - List all users\n >> \
-/join <channel> - Join a channel\n >> /quit - Quit the server\n >> /help - Show this help message"
-    )
-    return client_socket
 
 
-def set_name(client_socket, server_running) -> str:
-    name: str = ""
-    setting_name: bool = True
-    while setting_name:
-        print("\n >> Please enter your name:")
-        name: str = input()
-        if not name:
-            print(" >> Name cannot be empty!")
-            continue
-        if not all(char.isalnum() or char == "_" for char in name):
-            print(
-                "Invalid name. Please use alphanumeric characters or underscores only."
-            )
-            continue
-
-        client_socket.send(name.encode())
-        name_response = client_socket.recv(1024).decode()
-
-        if name_response == "name_rejected":
-            print(" >> Name taken!")
-            continue
-        elif name_response == "name_accepted":
-            print(f" >> You've successfully connected! Welcome, {name}!")
-            setting_name = False
-        else:
-            print(" >> Undefined server response. Exiting!")
-            client_socket.close()
-            server_running.clear()
-            sys.exit()
-    return name
-
-
-def receive_messages(client_socket, server_running):
+def receive_messages(client_socket, output_buffer, app):
+    """Runs in a background thread.  Reads from the socket and pushes
+    every message into the shared output buffer."""
     while server_running.is_set():
         try:
-            recv_message = client_socket.recv(1024).decode()
-            if recv_message == "":
-                client_socket.close()
-                print(" >> The server disconnected!")
+            data = client_socket.recv(1024)
+            if data == b"":
+                output_buffer.insert_text(" >> The server disconnected!\n")
+                output_buffer.cursor_position = len(output_buffer.text)
                 server_running.clear()
-            else:
-                print("(" + datetime.now().strftime("%H:%M:%S") + ") " + recv_message)
-        except socket.error as e:
-            client_socket.close()
-            print(f" >> A connection error occurred: {e}")
-            server_running.clear()
+                app.invalidate()
+                break
 
-
-def send_message(client_socket, name, server_running):
-    while server_running.is_set():
-        message: str = input()
-        if message == "/quit":
-            client_socket.send(b"/quit")
+            message = data.decode()
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            output_buffer.insert_text(f"({timestamp}) {message}\n")
+            output_buffer.cursor_position = len(output_buffer.text)
+            app.invalidate()
+        except OSError as e:
+            output_buffer.insert_text(f" >> A connection error occurred: {e}\n")
+            output_buffer.cursor_position = len(output_buffer.text)
             server_running.clear()
-            print(" >> Leaving! << ")
+            app.invalidate()
             break
-        elif message == "/help":
-            print(
-                " >> /list - List all channels\n >> /users - List all users\n >> \
-/join <channel> - Join a channel\n >> /quit - Quit the server\n >> /help - Show this help message"
-            )
-            continue
+
+
+def is_valid_name(name):
+    return name and all(char.isalnum() or char == "_" for char in name)
+
+
+def run(host, port):
+    client_socket = connect_to_server(host, port)
+
+    # --- Buffers ---
+    output_buffer = Buffer(multiline=True)
+    input_buffer = Buffer(multiline=False)
+
+    # --- Name-negotiation state (mutated by key handlers) ---
+    naming = True
+    name = ""
+
+    # --- Key bindings ---
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def send_handler(event):
+        nonlocal naming, name
+        text = input_buffer.text
+        input_buffer.reset()
+        if not text:
+            return
+
+        # ---- Phase 1: pick a name ----
+        if naming:
+            if not is_valid_name(text):
+                output_buffer.insert_text(
+                    "Invalid name. Use alphanumeric characters or underscores only.\n"
+                )
+                output_buffer.insert_text(" >> Please enter your name: \n")
+                output_buffer.cursor_position = len(output_buffer.text)
+                return
+
+            try:
+                client_socket.send(text.encode())
+                client_socket.settimeout(5.0)
+                response = client_socket.recv(1024).decode()
+                client_socket.settimeout(None)
+            except OSError as e:
+                output_buffer.insert_text(f" >> Connection error: {e}\n")
+                output_buffer.cursor_position = len(output_buffer.text)
+                server_running.clear()
+                event.app.exit()
+                return
+
+            if response == "name_rejected":
+                output_buffer.insert_text(" >> Name taken!\n")
+                output_buffer.insert_text(" >> Please enter your name: \n")
+                output_buffer.cursor_position = len(output_buffer.text)
+                return
+            elif response == "name_accepted":
+                name = text
+                naming = False
+                output_buffer.insert_text(f" >> Welcome, {name}!\n\n")
+                output_buffer.cursor_position = len(output_buffer.text)
+
+                # The handshake is done -- start the receive thread now.
+                recv_thread = threading.Thread(
+                    target=receive_messages,
+                    args=(client_socket, output_buffer, event.app),
+                    daemon=True,
+                )
+                recv_thread.start()
+                return
+            else:
+                output_buffer.insert_text(" >> Undefined server response. Exiting!\n")
+                output_buffer.cursor_position = len(output_buffer.text)
+                server_running.clear()
+                event.app.exit()
+                return
+
+        # ---- Phase 2: normal chat ----
+        if text == "/quit":
+            try:
+                client_socket.send(b"/quit")
+            except OSError:
+                pass
+            output_buffer.insert_text(" >> Leaving! << \n")
+            output_buffer.cursor_position = len(output_buffer.text)
+            server_running.clear()
+            event.app.exit()
+            return
+
+        if text == "/help":
+            output_buffer.insert_text(HELP_TEXT + "\n")
+            output_buffer.cursor_position = len(output_buffer.text)
+            return
+
         try:
-            client_socket.send(message.encode())
-        except Exception as e:
-            print(f" >> An error occurred: {e}")
-            continue
+            client_socket.send(text.encode())
+        except OSError as e:
+            output_buffer.insert_text(f" >> An error occurred: {e}\n")
+            output_buffer.cursor_position = len(output_buffer.text)
+            server_running.clear()
+            event.app.exit()
+
+    @kb.add("c-c")
+    def quit_handler(event):
+        try:
+            client_socket.send(b"/quit")
+        except OSError:
+            pass
+        output_buffer.insert_text("\n >> Leaving! << \n")
+        server_running.clear()
+        event.app.exit()
+
+    # --- Layout ---
+    output_control = BufferControl(buffer=output_buffer, focusable=False)
+    input_control = BufferControl(buffer=input_buffer)
+
+    root_container = HSplit(
+        [
+            Window(content=output_control),
+            Window(height=1, char="\u2500", style="class:separator"),
+            Window(
+                height=1,
+                content=input_control,
+                style="class:input-field",
+            ),
+        ]
+    )
+
+    layout = Layout(root_container, focused_element=input_control)
+    style = Style.from_dict(
+        {
+            "separator": "fg:#555555",
+            "input-field": "bg:#1e1e1e",
+        }
+    )
+
+    app = Application(
+        layout=layout,
+        key_bindings=kb,
+        style=style,
+        full_screen=True,
+    )
+
+    # Seed the output buffer *before* the UI starts its event loop.
+    output_buffer.insert_text(f" >> Connected to {host}:{port}!\n")
+    output_buffer.insert_text("Here are a list of available commands:\n")
+    output_buffer.insert_text(HELP_TEXT + "\n\n")
+    output_buffer.insert_text(" >> Please enter your name: \n")
+    output_buffer.cursor_position = len(output_buffer.text)
+
+    # Blocking call -- runs prompt_toolkit on the main thread.
+    app.run()
+
+    # --- Cleanup (after app exits) ---
+    server_running.clear()
+    try:
+        client_socket.close()
+    except OSError:
+        pass
+    print("\nGoodbye!")
 
 
 if __name__ == "__main__":
