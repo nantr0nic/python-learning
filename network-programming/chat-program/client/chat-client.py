@@ -47,27 +47,33 @@ def connect_to_server(host, port):
         sys.exit()
 
 
-def receive_messages(client_socket, output_buffer, app):
+def receive_messages(client_socket, output_buffer, app, buffer_lock):
     """Runs in a background thread.  Reads from the socket and pushes
-    every message into the shared output buffer."""
+    every message into the shared output buffer.  *buffer_lock* protects
+    concurrent access from the UI thread (key-bindings)."""
     while server_running.is_set():
         try:
             data = client_socket.recv(1024)
             if data == b"":
-                output_buffer.insert_text(" >> The server disconnected!\n")
-                output_buffer.cursor_position = len(output_buffer.text)
+                with buffer_lock:
+                    output_buffer.insert_text(" >> The server disconnected!\n")
+                    output_buffer.cursor_position = len(output_buffer.text)
                 server_running.clear()
                 app.invalidate()
                 break
 
             message = data.decode()
             timestamp = datetime.now().strftime("%H:%M:%S")
-            output_buffer.insert_text(f"({timestamp}) {message}\n")
-            output_buffer.cursor_position = len(output_buffer.text)
+            with buffer_lock:
+                output_buffer.insert_text(f"({timestamp}) {message}\n")
+                output_buffer.cursor_position = len(output_buffer.text)
             app.invalidate()
         except OSError as e:
-            output_buffer.insert_text(f" >> A connection error occurred: {e}\n")
-            output_buffer.cursor_position = len(output_buffer.text)
+            with buffer_lock:
+                output_buffer.insert_text(
+                    f" >> A connection error occurred: {e}\n"
+                )
+                output_buffer.cursor_position = len(output_buffer.text)
             server_running.clear()
             app.invalidate()
             break
@@ -83,6 +89,13 @@ def run(host, port):
     # --- Buffers ---
     output_buffer = Buffer(multiline=True)
     input_buffer = Buffer(multiline=False)
+    buffer_lock = threading.Lock()
+
+    def write_output(text):
+        """Thread-safe helper: insert *text* into the output buffer."""
+        with buffer_lock:
+            output_buffer.insert_text(text)
+            output_buffer.cursor_position = len(output_buffer.text)
 
     # --- Name-negotiation state (mutated by key handlers) ---
     naming = True
@@ -102,11 +115,10 @@ def run(host, port):
         # ---- Phase 1: pick a name ----
         if naming:
             if not is_valid_name(text):
-                output_buffer.insert_text(
+                write_output(
                     "Invalid name. Use alphanumeric characters or underscores only.\n"
                 )
-                output_buffer.insert_text(" >> Please enter your name: \n")
-                output_buffer.cursor_position = len(output_buffer.text)
+                write_output(" >> Please enter your name: \n")
                 return
 
             try:
@@ -115,34 +127,30 @@ def run(host, port):
                 response = client_socket.recv(1024).decode()
                 client_socket.settimeout(None)
             except OSError as e:
-                output_buffer.insert_text(f" >> Connection error: {e}\n")
-                output_buffer.cursor_position = len(output_buffer.text)
+                write_output(f" >> Connection error: {e}\n")
                 server_running.clear()
                 event.app.exit()
                 return
 
             if response == "name_rejected":
-                output_buffer.insert_text(" >> Name taken!\n")
-                output_buffer.insert_text(" >> Please enter your name: \n")
-                output_buffer.cursor_position = len(output_buffer.text)
+                write_output(" >> Name taken!\n")
+                write_output(" >> Please enter your name: \n")
                 return
             elif response == "name_accepted":
                 name = text
                 naming = False
-                output_buffer.insert_text(f" >> Welcome, {name}!\n\n")
-                output_buffer.cursor_position = len(output_buffer.text)
+                write_output(f" >> Welcome, {name}!\n\n")
 
-                # The handshake is done -- start the receive thread now.
+                # Handshake done -- start the receive thread now.
                 recv_thread = threading.Thread(
                     target=receive_messages,
-                    args=(client_socket, output_buffer, event.app),
+                    args=(client_socket, output_buffer, event.app, buffer_lock),
                     daemon=True,
                 )
                 recv_thread.start()
                 return
             else:
-                output_buffer.insert_text(" >> Undefined server response. Exiting!\n")
-                output_buffer.cursor_position = len(output_buffer.text)
+                write_output(" >> Undefined server response. Exiting!\n")
                 server_running.clear()
                 event.app.exit()
                 return
@@ -153,22 +161,19 @@ def run(host, port):
                 client_socket.send(b"/quit")
             except OSError:
                 pass
-            output_buffer.insert_text(" >> Leaving! << \n")
-            output_buffer.cursor_position = len(output_buffer.text)
+            write_output(" >> Leaving! << \n")
             server_running.clear()
             event.app.exit()
             return
 
         if text == "/help":
-            output_buffer.insert_text(HELP_TEXT + "\n")
-            output_buffer.cursor_position = len(output_buffer.text)
+            write_output(HELP_TEXT + "\n")
             return
 
         try:
             client_socket.send(text.encode())
         except OSError as e:
-            output_buffer.insert_text(f" >> An error occurred: {e}\n")
-            output_buffer.cursor_position = len(output_buffer.text)
+            write_output(f" >> An error occurred: {e}\n")
             server_running.clear()
             event.app.exit()
 
@@ -178,7 +183,7 @@ def run(host, port):
             client_socket.send(b"/quit")
         except OSError:
             pass
-        output_buffer.insert_text("\n >> Leaving! << \n")
+        write_output("\n >> Leaving! << \n")
         server_running.clear()
         event.app.exit()
 
@@ -188,7 +193,7 @@ def run(host, port):
 
     root_container = HSplit(
         [
-            Window(content=output_control),
+            Window(content=output_control, wrap_lines=True, dont_extend_width=False),
             Window(height=1, char="\u2500", style="class:separator"),
             Window(
                 height=1,
@@ -214,11 +219,10 @@ def run(host, port):
     )
 
     # Seed the output buffer *before* the UI starts its event loop.
-    output_buffer.insert_text(f" >> Connected to {host}:{port}!\n")
-    output_buffer.insert_text("Here are a list of available commands:\n")
-    output_buffer.insert_text(HELP_TEXT + "\n\n")
-    output_buffer.insert_text(" >> Please enter your name: \n")
-    output_buffer.cursor_position = len(output_buffer.text)
+    write_output(f" >> Connected to {host}:{port}!\n")
+    write_output("Here are a list of available commands:\n")
+    write_output(HELP_TEXT + "\n\n")
+    write_output(" >> Please enter your name: \n")
 
     # Blocking call -- runs prompt_toolkit on the main thread.
     app.run()
