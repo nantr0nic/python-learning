@@ -83,7 +83,7 @@ class Server:
                 setting_name = False
 
         await self.broadcast_global_message(
-            f"\n<<Server>> {user.name} has joined the server!".encode()
+            f"<<Server>> {user.name} has joined the server!".encode()
         )
         await self.handle_join_channel(user, "general")
         await self.handle_messages(user)
@@ -193,7 +193,7 @@ class Server:
         if channel not in self.chat_channels:
             self.chat_channels[channel] = {"members": set()}
             user.user_writer.write(
-                f"<<Server>> #{channel} doesn't exist. Creating it!".encode()
+                f"<<Server>> #{channel} doesn't exist. Creating it!\n".encode()
             )
         if old_channel:
             self.chat_channels[user.channel]["members"].discard(user)
